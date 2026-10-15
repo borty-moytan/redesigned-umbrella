@@ -32,11 +32,15 @@ F/
         └── greeting.sh
 ```
 
-At each module directory, the loader sources that directory's `*.sh` files (excluding its `setup.sh`) first, then visits child directories that contain their own `setup.sh`. File and directory discovery is lexicographic according to Bash's glob ordering. Folders without `setup.sh` are ignored, so `helpers/` is not treated as a Bash module. The loader skips directories already loaded in the current shell.
+The loader follows a directory-boundary rule:
+
+- If a visited directory contains `setup.sh`, it sources that file and does not automatically load sibling scripts or descend further into that directory. That `setup.sh` can explicitly call `__f_load_module_dir "${BASH_SOURCE[0]}"` to take control of loading its own sibling scripts and descendants.
+- If a visited directory has no `setup.sh`, the loader sources all eligible `*.sh` files there, then recursively applies the same rule to its child folders.
+- Any shell script or directory whose basename starts with `_` is skipped at every level. An underscore-prefixed directory is excluded entirely, including any `setup.sh`, scripts, or nested folders it contains. File and directory discovery follows Bash's glob ordering. Directories are canonicalized to avoid recursive loops through symlinks, and loaded modules are guarded against repeated sourcing.
 
 ### Add a module
 
-Create `F/modules/my-tool/setup.sh` and put Bash files beside it. The setup file can be as simple as:
+Create `F/modules/my-tool/setup.sh`. If you want the setup file to be the module's sole entry point, leave it without an automatic loader call; sibling scripts and descendants will not be loaded by the parent walker. If instead you want the module setup file to load its sibling scripts and apply recursive discovery beneath its directory, use:
 
 ```bash
 if declare -F __f_load_module_dir >/dev/null 2>&1; then
@@ -44,7 +48,7 @@ if declare -F __f_load_module_dir >/dev/null 2>&1; then
 fi
 ```
 
-The loader sources other `*.sh` files in `my-tool/`, then any child folders which have their own `setup.sh`. Use function and variable names with your own prefix to avoid collisions.
+Use function and variable names with your own prefix to avoid collisions.
 
 ## Utilities
 
@@ -55,7 +59,15 @@ The loader sources other `*.sh` files in `my-tool/`, then any child folders whic
 - `f_enable_error_trap --inherit` also enables Bash `errtrace` so errors inside functions can be caught.
 - `f_disable_error_trap` removes the F trap and restores a previously installed `ERR` trap.
 
+Tracebacks include the failing file, line, function, caller frames, original command, exit status, working directory, Bash version, and PID. The logger also suppresses Bash's duplicate `ERR` event when a function merely propagates the same failure via `return "$status"`, without hiding a separate failed command in that function.
+
 The trap is deliberately **not enabled automatically**: a global `ERR` trap can change the feel and behaviour of an interactive shell. It also does not silently enable `set -e`. Call `f_enable_error_trap` when you explicitly want it.
+
+Run the error-logger regression test with:
+
+```bash
+bash ~/.config/F/tests/test_errors.sh
+```
 
 ### System health
 
